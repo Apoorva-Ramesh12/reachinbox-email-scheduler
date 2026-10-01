@@ -1,0 +1,94 @@
+# Infrastructure (default):   docker compose up -d
+# Full stack incl. app:       docker compose --profile app up -d --build
+name: email-scheduler
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${DB_NAME:-email_scheduler}
+      MYSQL_USER: ${DB_USER:-scheduler}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports: ['3307:3306']
+    volumes: [mysql_data:/var/lib/mysql]
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF persistence: delayed jobs survive a Redis restart, not just an app restart.
+    command: ['redis-server', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    ports: ['6379:6379']
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports: ['9200:9200']
+    volumes: [es_data:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fs http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    profiles: [app]
+    build: { context: ./backend }
+    restart: unless-stopped
+    env_file: .env
+    environment: &app-env
+      NODE_ENV: production
+      DB_HOST: mysql
+      REDIS_HOST: redis
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      FRONTEND_URL: http://localhost:8080
+      RUN_MIGRATIONS_ON_START: 'true'
+    ports: ['4000:4000']
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    profiles: [app]
+    build: { context: ./backend }
+    restart: unless-stopped
+    command: ['node', 'dist/workers/worker.js']
+    env_file: .env
+    environment: *app-env
+    stop_grace_period: 30s
+    depends_on:
+      backend: { condition: service_healthy }
+
+  frontend:
+    profiles: [app]
+    build: { context: ./frontend }
+    restart: unless-stopped
+    ports: ['8080:80']
+    depends_on: [backend]
+
+volumes:
+  mysql_data:
+  redis_data:
+  es_data:

@@ -1,0 +1,17 @@
+{
+  "name": "email-scheduler",
+  "private": true,
+  "description": "Convenience scripts for the monorepo (backend + frontend)",
+  "scripts": {
+    "install:all": "npm --prefix backend ci && npm --prefix frontend ci",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "migrate": "npm --prefix backend run migrate",
+    "dev:api": "npm --prefix backend run dev",
+    "dev:worker": "npm --prefix backend run dev:worker",
+    "dev:web": "npm --prefix frontend run dev",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build"
+  }
+}
